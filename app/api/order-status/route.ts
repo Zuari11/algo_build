@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    console.log(`Checking status for order: ${orderId}`);
+
     // Initialize Supabase client with admin privileges
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,6 +36,7 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (orderError || !orderData) {
+      console.error('Order not found:', orderId);
       return NextResponse.json(
         { error: 'Order not found', details: orderError },
         { status: 404 }
@@ -54,14 +57,19 @@ export async function GET(request: NextRequest) {
     const cashfreeData = await cashfreeResponse.json();
 
     if (!cashfreeResponse.ok) {
+      console.error('Cashfree API error:', cashfreeData);
       return NextResponse.json(
         { error: 'Failed to get order status from Cashfree', details: cashfreeData },
         { status: 500 }
       );
     }
 
+    console.log(`Cashfree status for order ${orderId}: ${cashfreeData.order_status}, current DB status: ${orderData.status}`);
+
     // Update order status in Supabase if changed
     if (orderData.status !== cashfreeData.order_status) {
+      console.log(`Updating order status from ${orderData.status} to ${cashfreeData.order_status}`);
+      
       const { error: updateError } = await supabase
         .from('coin_orders')
         .update({ status: cashfreeData.order_status, updated_at: new Date().toISOString() })
@@ -72,19 +80,46 @@ export async function GET(request: NextRequest) {
       }
 
       // If payment is successful, add coins to user balance
-      if (cashfreeData.order_status === 'PAID') {
+      if (cashfreeData.order_status === 'PAID' && orderData.status !== 'PAID') {
+        console.log(`Payment successful for order ${orderId}. Adding ${orderData.coins} coins to user ${orderData.user_id}`);
+        
         // Add transaction record
         const { error: transactionError } = await supabase
           .from('coin_transactions')
           .insert({
             user_id: orderData.user_id,
             amount: orderData.coins,
-            transaction_type: 'recharge',
+            transaction_type: 'purchase',
             description: `Purchased ${orderData.coins} coins via Cashfree (Order ID: ${orderId})`
           });
 
         if (transactionError) {
           console.error('Error creating transaction record:', transactionError);
+        }
+        
+        // Update user's coin balance
+        const { data: userData, error: getUserError } = await supabase
+          .from('users')
+          .select('coin_balance')
+          .eq('id', orderData.user_id)
+          .single();
+          
+        if (getUserError) {
+          console.error('Error fetching user:', getUserError);
+        } else {
+          const currentBalance = userData.coin_balance || 0;
+          const newBalance = currentBalance + orderData.coins;
+          
+          const { error: updateUserError } = await supabase
+            .from('users')
+            .update({ coin_balance: newBalance, updated_at: new Date().toISOString() })
+            .eq('id', orderData.user_id);
+            
+          if (updateUserError) {
+            console.error('Error updating user balance:', updateUserError);
+          } else {
+            console.log(`User balance updated successfully. New balance: ${newBalance} coins`);
+          }
         }
       }
     }

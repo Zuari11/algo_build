@@ -83,6 +83,8 @@ export default function DashboardPricing() {
                 return;
             }
 
+            console.log(`Initiating purchase: ${coins} coins for ₹${amount}`);
+
             // Call the create-order API
             const response = await fetch('/api/create-order', {
                 method: 'POST',
@@ -101,6 +103,8 @@ export default function DashboardPricing() {
                 throw new Error(data.error || 'Failed to create order');
             }
 
+            console.log(`Order created successfully. Order ID: ${data.order_id}`);
+
             // Initialize Cashfree checkout
             if (window.Cashfree && cashfreeReady) {
                 const cashfree = new window.Cashfree();
@@ -111,14 +115,17 @@ export default function DashboardPricing() {
                     redirectTarget: "_self",
                 };
                 
+                console.log("Opening Cashfree checkout...");
+                
                 // Open Cashfree checkout
                 cashfree.checkout(checkoutOptions);
             } else {
-                alert('Payment gateway not ready. Please try again.');
+                console.error("Cashfree SDK not ready");
+                alert('Payment gateway not ready. Please try again in a moment.');
             }
         } catch (error) {
             console.error('Error processing purchase:', error);
-            alert('An error occurred while processing your purchase');
+            alert('An error occurred while processing your purchase. Please try again.');
         } finally {
             setLoadingButtonId(null);
         }
@@ -132,10 +139,16 @@ export default function DashboardPricing() {
                 onLoad={() => {
                     if (window.Cashfree) {
                         window.cashfree = window.Cashfree({
-                            mode: "production", // or "sandbox" for testing
+                            mode: "production", // Using production mode
                         });
                         setCashfreeReady(true);
+                        console.log("Cashfree SDK loaded successfully");
+                    } else {
+                        console.error("Failed to load Cashfree SDK");
                     }
+                }}
+                onError={() => {
+                    console.error("Error loading Cashfree SDK");
                 }}
             />
 
